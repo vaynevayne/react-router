@@ -12,6 +12,7 @@ import {
   Action as NavigationType,
   AbortedDeferredError,
   createMemoryHistory,
+  ErrorResponse,
   invariant,
   parsePath,
   stripBasename,
@@ -40,6 +41,7 @@ import {
   useInRouterContext,
   useNavigate,
   useOutlet,
+  useRouteError,
   useRoutes,
   _renderMatches,
 } from "./hooks";
@@ -244,6 +246,14 @@ export interface PathRouteProps {
   children?: React.ReactNode;
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: NonIndexRouteObject["loader"];
+    action?: NonIndexRouteObject["action"];
+    shouldRevalidate?: NonIndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    ErrorBoundary?: React.ComponentType<{ error: unknown }>;
+    default: React.ComponentType<{}>;
+  }>;
 }
 
 export interface LayoutRouteProps extends PathRouteProps {}
@@ -261,6 +271,14 @@ export interface IndexRouteProps {
   children?: undefined;
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: IndexRouteObject["loader"];
+    action?: IndexRouteObject["action"];
+    shouldRevalidate?: IndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    ErrorBoundary?: React.ComponentType<{ error: unknown }>;
+    default: React.ComponentType<{}>;
+  }>;
 }
 
 export type RouteProps = PathRouteProps | LayoutRouteProps | IndexRouteProps;
@@ -593,6 +611,7 @@ export function createRoutesFromChildren(
       hasErrorBoundary: element.props.errorElement != null,
       shouldRevalidate: element.props.shouldRevalidate,
       handle: element.props.handle,
+      lazy: element.props.lazy,
     };
 
     if (element.props.children) {
@@ -617,16 +636,183 @@ export function renderMatches(
   return _renderMatches(matches);
 }
 
+// Just hacking the route modules cache here for now
+type LazyRouteModule = Awaited<ReturnType<NonNullable<RouteObject["lazy"]>>>;
+const routeModules: Record<string, LazyRouteModule> = {};
+
+/**
+ * Compares the original route config with the lazy-loaded route config and
+ * warns if there are any duplications.
+ */
+function validateLazyRouteModule({
+  routeId,
+  originalRoute,
+  lazyRouteModule,
+}: {
+  routeId: string;
+  originalRoute: RouteObject;
+  lazyRouteModule: LazyRouteModule;
+}) {
+  if (originalRoute.element && lazyRouteModule.default !== undefined) {
+    console.warn(
+      `Route "${routeId}" has both an "element" defined and a lazy-loaded component. The lazy-loaded component will be ignored.`
+    );
+  }
+
+  if (originalRoute.loader && lazyRouteModule.loader !== undefined) {
+    console.warn(
+      `Route "${routeId}" has both a "loader" defined and a lazy-loaded "loader". The lazy-loaded "loader" function will be ignored.`
+    );
+  }
+
+  if (originalRoute.errorElement) {
+    if (lazyRouteModule.ErrorBoundary !== undefined) {
+      console.warn(
+        `Route "${routeId}" has both an "errorElement" defined and a lazy-loaded "ErrorBoundary". The lazy-loaded "ErrorBoundary" function will be ignored.`
+      );
+    } else if (lazyRouteModule.errorElement !== undefined) {
+      console.warn(
+        `Route "${routeId}" has both an "errorElement" defined and a lazy-loaded "errorElement". The lazy-loaded "errorElement" function will be ignored.`
+      );
+    }
+  }
+
+  if (
+    originalRoute.shouldRevalidate &&
+    lazyRouteModule.shouldRevalidate !== undefined
+  ) {
+    console.warn(
+      `Route "${routeId}" has both a "shouldRevalidate" function defined and a lazy-loaded "shouldRevalidate". The lazy-loaded "shouldRevalidate" function will be ignored.`
+    );
+  }
+}
+
 /**
  * @private
- * Walk the route tree and add hasErrorBoundary if it's not provided, so that
- * users providing manual route arrays can just specify errorElement
+ * Walk the route tree, handling lazy route modules and and adding
+ * hasErrorBoundary if it's not provided, so that users providing manual route
+ * arrays can just specify errorElement
  */
 export function enhanceManualRouteObjects(
-  routes: RouteObject[]
+  routes: RouteObject[],
+  parentPath: number[] = []
 ): RouteObject[] {
-  return routes.map((route) => {
-    let routeClone = { ...route };
+  return routes.map((originalRoute, index) => {
+    let routeClone: RouteObject = { ...originalRoute };
+
+    if (routeClone.lazy) {
+      let treePath = [...parentPath, index];
+
+      // Ensure the route has an ID so we can cache the lazy-loaded module.
+      let routeId: string;
+      if (routeClone.id) {
+        routeId = routeClone.id;
+      } else {
+        routeId = treePath.join("-");
+        routeClone.id = routeId;
+      }
+
+      let originalLoader = routeClone.loader;
+      routeClone.loader = async (args) => {
+        let cachedRouteModule = routeModules[routeId];
+        let routeModulePromise = !cachedRouteModule
+          ? routeClone.lazy?.().then((lazyRouteModule) => {
+              if (__DEV__) {
+                validateLazyRouteModule({
+                  routeId,
+                  originalRoute,
+                  lazyRouteModule,
+                });
+              }
+
+              routeModules[routeId] = lazyRouteModule;
+              return lazyRouteModule;
+            })
+          : undefined;
+
+        let loader =
+          originalLoader ||
+          (cachedRouteModule || (await routeModulePromise))?.loader;
+
+        let [loaderResponse] = await Promise.all([
+          loader ? loader(args) : null,
+          routeModulePromise,
+        ]);
+
+        return loaderResponse;
+      };
+
+      let originalAction = routeClone.action;
+      routeClone.action = async (args) => {
+        // TODO: Refactor this duplication
+        let cachedRouteModule = routeModules[routeId];
+        let routeModulePromise = !cachedRouteModule
+          ? routeClone.lazy?.().then((lazyRouteModule) => {
+              if (__DEV__) {
+                validateLazyRouteModule({
+                  routeId,
+                  originalRoute,
+                  lazyRouteModule,
+                });
+              }
+
+              routeModules[routeId] = lazyRouteModule;
+              return lazyRouteModule;
+            })
+          : undefined;
+
+        let action =
+          originalAction ||
+          (cachedRouteModule || (await routeModulePromise))?.action;
+
+        if (!action) {
+          let method = args.request.method.toUpperCase();
+          let pathname = new URL(args.request.url).pathname;
+          throw new ErrorResponse(
+            405,
+            "Method Not Allowed",
+            `You made a ${method} request to "${pathname}" but ` +
+              `did not provide an \`action\` for route "${routeId}", ` +
+              `so there is no way to handle the request.`,
+            true
+          );
+        }
+
+        let [actionResponse] = await Promise.all([
+          action(args),
+          routeModulePromise,
+        ]);
+
+        return actionResponse;
+      };
+
+      if (!routeClone.element) {
+        routeClone.element = <LazyRoute id={routeId} />;
+      }
+
+      if (!routeClone.errorElement) {
+        // Is it a problem that every lazy route needs to have
+        // an error element up front since we don't know ahead
+        // of time whether the module will handle errors?
+        // Note that this LazyError component rethrows the error
+        // if the module doesn't provide an ErrorBoundary.
+        routeClone.errorElement = <LazyError id={routeId} />;
+        routeClone.hasErrorBoundary = true;
+      }
+
+      if (!routeClone.shouldRevalidate) {
+        routeClone.shouldRevalidate = (args) => {
+          let routeModule = routeModules[routeId];
+
+          if (!routeModule || !routeModule.shouldRevalidate) {
+            return args.defaultShouldRevalidate;
+          }
+
+          return routeModule.shouldRevalidate(args);
+        };
+      }
+    }
+
     if (routeClone.hasErrorBoundary == null) {
       routeClone.hasErrorBoundary = routeClone.errorElement != null;
     }
@@ -635,4 +821,34 @@ export function enhanceManualRouteObjects(
     }
     return routeClone;
   });
+}
+
+function LazyRoute({ id }: { id: string }) {
+  let routeModule = routeModules[id];
+
+  if (!routeModule) {
+    throw new Error('No route module found for "' + id + '"');
+  }
+
+  let LazyRouteComponent = routeModule.default;
+  return <LazyRouteComponent />;
+}
+
+function LazyError({ id }: { id: string }) {
+  let routeError = useRouteError();
+
+  // React Router has "errorElement" but Remix has "ErrorBoundary".
+  // Supporting both for now, but not sure.
+  let errorElement = routeModules[id]?.errorElement;
+  let ErrorBoundary = routeModules[id]?.ErrorBoundary;
+
+  if (!ErrorBoundary && !errorElement) {
+    throw routeError;
+  }
+
+  return ErrorBoundary ? (
+    <ErrorBoundary error={routeError} />
+  ) : (
+    <>{errorElement}</>
+  );
 }

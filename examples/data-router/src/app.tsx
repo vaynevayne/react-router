@@ -44,6 +44,13 @@ let router = createBrowserRouter(
         loader={deferredLoader}
         element={<DeferredPage />}
       />
+      <Route
+        path="lazy"
+        lazy={async () => {
+          await sleep();
+          return await import("./lazy");
+        }}
+      />
     </Route>
   )
 );
@@ -93,6 +100,9 @@ export function Layout() {
           </li>
           <li>
             <Link to="/deferred">Deferred</Link>
+          </li>
+          <li>
+            <Link to="/lazy">Lazy</Link>
           </li>
           <li>
             <Link to="/404">404 Link</Link>
