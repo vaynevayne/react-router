@@ -21,6 +21,31 @@ export const routes = [
         element: <Dashboard />,
       },
       {
+        path: "lazy",
+        async lazy() {
+          let {
+            default: Component,
+            loader,
+            action,
+            ErrorBoundary,
+            shouldRevalidate,
+          } = await import("./lazy");
+
+          return {
+            element: <Component />,
+            loader,
+            action,
+            shouldRevalidate,
+            ...(ErrorBoundary
+              ? {
+                  errorElement: <ErrorBoundary />,
+                  hasErrorBoundary: true,
+                }
+              : {}),
+          };
+        },
+      },
+      {
         path: "redirect",
         loader: redirectLoader,
       },
@@ -69,6 +94,9 @@ function Layout() {
           </li>
           <li>
             <Link to="/dashboard">Dashboard</Link>
+          </li>
+          <li>
+            <Link to="/lazy">Lazy</Link>
           </li>
           <li>
             <Link to="/redirect">Redirect to Home</Link>

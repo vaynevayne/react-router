@@ -26,7 +26,7 @@ import { addTodo, deleteTodo, getTodos } from "./todos";
 
 import "./index.css";
 
-let router = createBrowserRouter(
+let router = await createBrowserRouter(
   createRoutesFromElements(
     <Route path="/" element={<Layout />}>
       <Route index loader={homeLoader} element={<Home />} />
@@ -43,6 +43,31 @@ let router = createBrowserRouter(
         path="deferred"
         loader={deferredLoader}
         element={<DeferredPage />}
+      />
+      <Route
+        path="lazy"
+        lazy={async () => {
+          let {
+            default: Component,
+            loader,
+            action,
+            ErrorBoundary,
+            shouldRevalidate,
+          } = await import("./lazy");
+
+          return {
+            element: <Component />,
+            loader,
+            action,
+            shouldRevalidate,
+            ...(ErrorBoundary
+              ? {
+                  errorElement: <ErrorBoundary />,
+                  hasErrorBoundary: true,
+                }
+              : {}),
+          };
+        }}
       />
     </Route>
   )
@@ -93,6 +118,9 @@ export function Layout() {
           </li>
           <li>
             <Link to="/deferred">Deferred</Link>
+          </li>
+          <li>
+            <Link to="/lazy">Lazy</Link>
           </li>
           <li>
             <Link to="/404">404 Link</Link>

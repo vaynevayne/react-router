@@ -306,6 +306,18 @@ export function createStaticRouter(
     },
     _internalFetchControllers: new Map(),
     _internalActiveDeferreds: new Map(),
+    addRoute() {
+      throw msg("addRoute");
+    },
+    updateRoute() {
+      throw msg("updateRoute");
+    },
+    deleteRoute() {
+      throw msg("deleteRoute");
+    },
+    setNewRoutes() {
+      throw msg("setNewRoutes");
+    },
   };
 }
 

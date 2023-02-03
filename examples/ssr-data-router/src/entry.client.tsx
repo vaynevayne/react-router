@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import { routes } from "./App";
 
-let router = createBrowserRouter(routes);
+let router = await createBrowserRouter(routes);
 
 ReactDOM.hydrateRoot(
   document.getElementById("app"),

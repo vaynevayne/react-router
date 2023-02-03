@@ -151,6 +151,13 @@ type AgnosticBaseRouteObject = {
   hasErrorBoundary?: boolean;
   shouldRevalidate?: ShouldRevalidateFunction;
   handle?: any;
+  lazy?: () => Promise<{
+    loader?: LoaderFunction;
+    action?: ActionFunction;
+    hasErrorBoundary?: boolean;
+    handle?: any;
+    shouldRevalidate?: ShouldRevalidateFunction;
+  }>;
 };
 
 /**
@@ -295,16 +302,17 @@ export function convertRoutesToDataRoutes(
     allIds.add(id);
 
     if (isIndexRoute(route)) {
-      let indexRoute: AgnosticDataIndexRouteObject = { ...route, id };
-      return indexRoute;
+      return Object.assign(route, { id }) as AgnosticDataIndexRouteObject;
     } else {
-      let pathOrLayoutRoute: AgnosticDataNonIndexRouteObject = {
-        ...route,
-        id,
-        children: route.children
-          ? convertRoutesToDataRoutes(route.children, treePath, allIds)
-          : undefined,
-      };
+      let pathOrLayoutRoute: AgnosticDataNonIndexRouteObject = Object.assign(
+        route,
+        {
+          id,
+          children: route.children
+            ? convertRoutesToDataRoutes(route.children, treePath, allIds)
+            : undefined,
+        }
+      );
       return pathOrLayoutRoute;
     }
   });

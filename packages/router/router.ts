@@ -667,7 +667,7 @@ let cloneDataRoutes = (
 /**
  * Create a router and listen to history POP navigations
  */
-export function createRouter(init: RouterInit): Router {
+export async function createRouter(init: RouterInit): Promise<Router> {
   invariant(
     init.routes.length > 0,
     "You must provide a non-empty routes array to createRouter"
@@ -711,8 +711,32 @@ export function createRouter(init: RouterInit): Router {
     initialErrors = { [route.id]: error };
   }
 
+  if (init.hydrationData) {
+    let lazyInitialMatches = initialMatches.filter(
+      (m) => typeof m.route.lazy === "function"
+    );
+
+    // If we're hydrating, we need to resolve all lazy routes before we can render
+    if (lazyInitialMatches.length > 0) {
+      await Promise.all(
+        lazyInitialMatches.map(async (m) => {
+          let routeModule = await m.route.lazy!();
+          Object.entries(routeModule).forEach(([key, value]) => {
+            m.route[key as keyof typeof m.route] = value;
+          });
+          // We're done resolving the lazy route, so we remove the
+          // lazy function to avoid attempting to resolve it again
+          m.route.lazy = undefined;
+        })
+      );
+    }
+  }
+
   let initialized =
-    !initialMatches.some((m) => m.route.loader) || init.hydrationData != null;
+    init.hydrationData != null ||
+    !initialMatches.some(
+      (m) => m.route.loader || typeof m.route.lazy === "function"
+    );
 
   let router: Router;
   let state: RouterState = {
@@ -1182,6 +1206,39 @@ export function createRouter(init: RouterInit): Router {
 
     // Create a controller/Request for this navigation
     pendingNavigationController = new AbortController();
+
+    let lazyMatches = matches.filter((m) => typeof m.route.lazy === "function");
+
+    if (lazyMatches.length > 0) {
+      let navigation: NavigationStates["Loading"] = {
+        state: "loading",
+        location,
+        formMethod: undefined,
+        formAction: undefined,
+        formEncType: undefined,
+        formData: undefined,
+      };
+      updateState({ navigation });
+
+      await Promise.all(
+        lazyMatches.map(async (m) => {
+          let routeModule = await m.route.lazy!();
+
+          let updatedRoute = {
+            ...m.route,
+            ...routeModule,
+            // We're done resolving the lazy route, so we remove the
+            // lazy function to avoid attempting to resolve it again
+            lazy: undefined,
+          };
+
+          updateRoute(m.route.id, updatedRoute);
+
+          m.route = updatedRoute;
+        })
+      );
+    }
+
     let request = createClientSideRequest(
       init.history,
       location,
@@ -2623,6 +2680,22 @@ export function createStaticHandler(
       request.signal,
       "query()/queryRoute() requests must contain an AbortController signal"
     );
+
+    let lazyMatches = matches.filter((m) => typeof m.route.lazy === "function");
+
+    if (lazyMatches.length > 0) {
+      await Promise.all(
+        lazyMatches.map(async (m) => {
+          let routeModule = await m.route.lazy!();
+          Object.entries(routeModule).forEach(([key, value]) => {
+            m.route[key as keyof typeof m.route] = value;
+          });
+          // We're done resolving the lazy route, so we remove the
+          // lazy function to avoid attempting to resolve it again
+          m.route.lazy = undefined;
+        })
+      );
+    }
 
     try {
       if (isMutationMethod(request.method.toLowerCase())) {

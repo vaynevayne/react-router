@@ -27,6 +27,15 @@ export interface IndexRouteObject {
   children?: undefined;
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: AgnosticIndexRouteObject["loader"];
+    action?: AgnosticIndexRouteObject["action"];
+    shouldRevalidate?: AgnosticIndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    hasErrorBoundary?: AgnosticIndexRouteObject["hasErrorBoundary"];
+    handle?: AgnosticIndexRouteObject["handle"];
+    element?: React.ReactNode | null;
+  }>;
 }
 
 export interface NonIndexRouteObject {
@@ -42,6 +51,15 @@ export interface NonIndexRouteObject {
   children?: RouteObject[];
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: AgnosticNonIndexRouteObject["loader"];
+    action?: AgnosticNonIndexRouteObject["action"];
+    shouldRevalidate?: AgnosticNonIndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    hasErrorBoundary?: AgnosticNonIndexRouteObject["hasErrorBoundary"];
+    handle?: AgnosticNonIndexRouteObject["handle"];
+    element?: React.ReactNode | null;
+  }>;
 }
 
 export type RouteObject = IndexRouteObject | NonIndexRouteObject;

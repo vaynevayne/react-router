@@ -244,6 +244,15 @@ export interface PathRouteProps {
   children?: React.ReactNode;
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: NonIndexRouteObject["loader"];
+    action?: NonIndexRouteObject["action"];
+    shouldRevalidate?: NonIndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    hasErrorBoundary?: NonIndexRouteObject["hasErrorBoundary"];
+    handle?: NonIndexRouteObject["handle"];
+    element?: React.ReactNode | null;
+  }>;
 }
 
 export interface LayoutRouteProps extends PathRouteProps {}
@@ -261,6 +270,15 @@ export interface IndexRouteProps {
   children?: undefined;
   element?: React.ReactNode | null;
   errorElement?: React.ReactNode | null;
+  lazy?: () => Promise<{
+    loader?: IndexRouteObject["loader"];
+    action?: IndexRouteObject["action"];
+    shouldRevalidate?: IndexRouteObject["shouldRevalidate"];
+    errorElement?: React.ReactNode | null;
+    hasErrorBoundary?: IndexRouteObject["hasErrorBoundary"];
+    handle?: IndexRouteObject["handle"];
+    element?: React.ReactNode | null;
+  }>;
 }
 
 export type RouteProps = PathRouteProps | LayoutRouteProps | IndexRouteProps;
@@ -593,6 +611,7 @@ export function createRoutesFromChildren(
       hasErrorBoundary: element.props.errorElement != null,
       shouldRevalidate: element.props.shouldRevalidate,
       handle: element.props.handle,
+      lazy: element.props.lazy,
     };
 
     if (element.props.children) {

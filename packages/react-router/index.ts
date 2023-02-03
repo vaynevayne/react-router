@@ -204,7 +204,7 @@ export {
   useRoutes,
 };
 
-export function createMemoryRouter(
+export async function createMemoryRouter(
   routes: RouteObject[],
   opts?: {
     basename?: string;
@@ -212,8 +212,8 @@ export function createMemoryRouter(
     initialEntries?: InitialEntry[];
     initialIndex?: number;
   }
-): RemixRouter {
-  return createRouter({
+): Promise<RemixRouter> {
+  let router = await createRouter({
     basename: opts?.basename,
     history: createMemoryHistory({
       initialEntries: opts?.initialEntries,
@@ -221,7 +221,9 @@ export function createMemoryRouter(
     }),
     hydrationData: opts?.hydrationData,
     routes: enhanceManualRouteObjects(routes),
-  }).initialize();
+  });
+
+  return router.initialize();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -197,36 +197,40 @@ declare global {
 //#region Routers
 ////////////////////////////////////////////////////////////////////////////////
 
-export function createBrowserRouter(
+export async function createBrowserRouter(
   routes: RouteObject[],
   opts?: {
     basename?: string;
     hydrationData?: HydrationState;
     window?: Window;
   }
-): RemixRouter {
-  return createRouter({
+): Promise<RemixRouter> {
+  let router = await createRouter({
     basename: opts?.basename,
     history: createBrowserHistory({ window: opts?.window }),
     hydrationData: opts?.hydrationData || parseHydrationData(),
     routes: enhanceManualRouteObjects(routes),
-  }).initialize();
+  });
+
+  return router.initialize();
 }
 
-export function createHashRouter(
+export async function createHashRouter(
   routes: RouteObject[],
   opts?: {
     basename?: string;
     hydrationData?: HydrationState;
     window?: Window;
   }
-): RemixRouter {
-  return createRouter({
+): Promise<RemixRouter> {
+  let router = await createRouter({
     basename: opts?.basename,
     history: createHashHistory({ window: opts?.window }),
     hydrationData: opts?.hydrationData || parseHydrationData(),
     routes: enhanceManualRouteObjects(routes),
-  }).initialize();
+  });
+
+  return router.initialize();
 }
 
 function parseHydrationData(): HydrationState | undefined {
