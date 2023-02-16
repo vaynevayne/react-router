@@ -1323,11 +1323,7 @@ export function createRouter(init: RouterInit): Router {
     let result: DataResult;
     let actionMatch = getTargetMatch(matches, location);
 
-    if (actionMatch.route.lazy) {
-      await loadLazyRouteModules([actionMatch], hasErrorBoundary, manifest);
-    }
-
-    if (!actionMatch.route.action) {
+    if (!actionMatch.route.action && !actionMatch.route.lazy) {
       result = {
         type: ResultType.error,
         error: getInternalRouterError(405, {
@@ -1342,6 +1338,8 @@ export function createRouter(init: RouterInit): Router {
         request,
         actionMatch,
         matches,
+        manifest,
+        hasErrorBoundary,
         router.basename
       );
 
@@ -1509,14 +1507,6 @@ export function createRouter(init: RouterInit): Router {
       fetchControllers.set(rf.key, pendingNavigationController!)
     );
 
-    let lazyMatches = matches.filter((m) => m.route.lazy);
-    if (lazyMatches.length > 0) {
-      await loadLazyRouteModules(lazyMatches, hasErrorBoundary, manifest);
-      if (request.signal.aborted) {
-        return { shortCircuited: true };
-      }
-    }
-
     let { results, loaderResults, fetcherResults } =
       await callLoadersAndMaybeResolveData(
         state.matches,
@@ -1638,7 +1628,7 @@ export function createRouter(init: RouterInit): Router {
     interruptActiveLoads();
     fetchLoadMatches.delete(key);
 
-    if (!match.route.lazy && !match.route.action) {
+    if (!match.route.action && !match.route.lazy) {
       let error = getInternalRouterError(405, {
         method: submission.formMethod,
         pathname: path,
@@ -1669,25 +1659,13 @@ export function createRouter(init: RouterInit): Router {
     );
     fetchControllers.set(key, abortController);
 
-    if (match.route.lazy) {
-      await loadLazyRouteModules([match], hasErrorBoundary, manifest);
-
-      if (!match.route.action) {
-        let error = getInternalRouterError(405, {
-          method: submission.formMethod,
-          pathname: path,
-          routeId: routeId,
-        });
-        setFetcherError(key, routeId, error);
-        return;
-      }
-    }
-
     let actionResult = await callLoaderOrAction(
       "action",
       fetchRequest,
       match,
       requestMatches,
+      manifest,
+      hasErrorBoundary,
       router.basename
     );
 
@@ -1790,14 +1768,6 @@ export function createRouter(init: RouterInit): Router {
       });
 
     updateState({ fetchers: new Map(state.fetchers) });
-
-    let lazyMatches = matches.filter((m) => m.route.lazy);
-    if (match.route.lazy) {
-      await loadLazyRouteModules(lazyMatches, hasErrorBoundary, manifest);
-      if (revalidationRequest.signal.aborted) {
-        return;
-      }
-    }
 
     let { results, loaderResults, fetcherResults } =
       await callLoadersAndMaybeResolveData(
@@ -1913,18 +1883,13 @@ export function createRouter(init: RouterInit): Router {
     );
     fetchControllers.set(key, abortController);
 
-    if (match.route.lazy) {
-      await loadLazyRouteModules([match], hasErrorBoundary, manifest);
-      if (fetchRequest.signal.aborted) {
-        return;
-      }
-    }
-
     let result: DataResult = await callLoaderOrAction(
       "loader",
       fetchRequest,
       match,
       matches,
+      manifest,
+      hasErrorBoundary,
       router.basename
     );
 
@@ -2118,7 +2083,15 @@ export function createRouter(init: RouterInit): Router {
     // accordingly
     let results = await Promise.all([
       ...matchesToLoad.map((match) =>
-        callLoaderOrAction("loader", request, match, matches, router.basename)
+        callLoaderOrAction(
+          "loader",
+          request,
+          match,
+          matches,
+          manifest,
+          hasErrorBoundary,
+          router.basename
+        )
       ),
       ...fetchersToLoad.map((f) =>
         callLoaderOrAction(
@@ -2126,6 +2099,8 @@ export function createRouter(init: RouterInit): Router {
           createClientSideRequest(init.history, f.path, request.signal),
           f.match,
           f.matches,
+          manifest,
+          hasErrorBoundary,
           router.basename
         )
       ),
@@ -2632,15 +2607,6 @@ export function createStaticHandler(
       "query()/queryRoute() requests must contain an AbortController signal"
     );
 
-    let lazyMatches = matches.filter((m) => m.route.lazy);
-    if (lazyMatches.length > 0) {
-      await loadLazyRouteModules(lazyMatches, hasErrorBoundary, manifest);
-      if (request.signal.aborted) {
-        let method = routeMatch != null ? "queryRoute" : "query";
-        throw new Error(`${method}() call aborted`);
-      }
-    }
-
     try {
       if (isMutationMethod(request.method.toLowerCase())) {
         let result = await submit(
@@ -2694,7 +2660,7 @@ export function createStaticHandler(
   ): Promise<Omit<StaticHandlerContext, "location" | "basename"> | Response> {
     let result: DataResult;
 
-    if (!actionMatch.route.action) {
+    if (!actionMatch.route.action && !actionMatch.route.lazy) {
       let error = getInternalRouterError(405, {
         method: request.method,
         pathname: new URL(request.url).pathname,
@@ -2713,6 +2679,8 @@ export function createStaticHandler(
         request,
         actionMatch,
         matches,
+        manifest,
+        hasErrorBoundary,
         basename,
         true,
         isRouteRequest,
@@ -2834,7 +2802,11 @@ export function createStaticHandler(
     let isRouteRequest = routeMatch != null;
 
     // Short circuit if we have no loaders to run (queryRoute())
-    if (isRouteRequest && !routeMatch?.route.loader) {
+    if (
+      isRouteRequest &&
+      !routeMatch?.route.loader &&
+      !routeMatch?.route.lazy
+    ) {
       throw getInternalRouterError(400, {
         method: request.method,
         pathname: new URL(request.url).pathname,
@@ -2873,6 +2845,8 @@ export function createStaticHandler(
           request,
           match,
           matches,
+          manifest,
+          hasErrorBoundary,
           basename,
           true,
           isRouteRequest,
@@ -3258,6 +3232,8 @@ async function callLoaderOrAction(
   request: Request,
   match: AgnosticDataRouteMatch,
   matches: AgnosticDataRouteMatch[],
+  manifest: RouteManifest,
+  hasErrorBoundary: HasErrorBoundaryFunction,
   basename = "/",
   isStaticRequest: boolean = false,
   isRouteRequest: boolean = false,
@@ -3273,23 +3249,49 @@ async function callLoaderOrAction(
   request.signal.addEventListener("abort", onReject);
 
   try {
+    if (match.route.lazy) {
+      await loadLazyRouteModules([match], hasErrorBoundary, manifest);
+    } else {
+      invariant<Function>(
+        match.route[type],
+        `Could not find the ${type} to run on the "${match.route.id}" route`
+      );
+    }
+
     let handler = match.route[type];
-    invariant<Function>(
-      handler,
-      `Could not find the ${type} to run on the "${match.route.id}" route`
-    );
+    if (!handler) {
+      if (type === "action") {
+        throw getInternalRouterError(405, {
+          method: request.method,
+          pathname: new URL(request.url).pathname,
+          routeId: match.route.id,
+        });
+      } else {
+        // lazy() route has no loader to run
+        result = undefined;
+      }
+    } else {
+      if (request.signal.aborted && type === "loader") {
+        // No need to run loaders if we got aborted during lazy()
+        result = await abortPromise;
+      } else {
+        // Still kick off actions if we got interrupted to maintain consistency
+        // with un-abortable behavior of action execution on non-lazy routes
+        result = await Promise.race([
+          handler({ request, params: match.params, context: requestContext }),
+          abortPromise,
+        ]);
+      }
 
-    result = await Promise.race([
-      handler({ request, params: match.params, context: requestContext }),
-      abortPromise,
-    ]);
-
-    invariant(
-      result !== undefined,
-      `You defined ${type === "action" ? "an action" : "a loader"} for route ` +
-        `"${match.route.id}" but didn't return anything from your \`${type}\` ` +
-        `function. Please return a value or \`null\`.`
-    );
+      invariant(
+        result !== undefined,
+        `You defined ${
+          type === "action" ? "an action" : "a loader"
+        } for route ` +
+          `"${match.route.id}" but didn't return anything from your \`${type}\` ` +
+          `function. Please return a value or \`null\`.`
+      );
+    }
   } catch (e) {
     resultType = ResultType.error;
     result = e;
